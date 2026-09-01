@@ -93,19 +93,6 @@ jobs:
           # Salta el tag de sesion, que el trust policy de los roles gestionados no permite
           role-skip-session-tagging: true
 
-      - name: Ensure SSM parameters exist
-        run: |
-          aws ssm put-parameter \
-            --name "/expensesAppManager/auth/user" \
-            --value "${{ secrets.APP_USERNAME }}" \
-            --type "String" \
-            --overwrite
-          aws ssm put-parameter \
-            --name "/expensesAppManager/auth/password" \
-            --value "${{ secrets.APP_PASSWORD }}" \
-            --type "String" \
-            --overwrite
-
       - name: SAM build
         run: sam build --template ${{ env.SAM_TEMPLATE }}
 
