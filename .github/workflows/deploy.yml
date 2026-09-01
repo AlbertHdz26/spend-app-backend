@@ -17,7 +17,6 @@ on:
 # Variables reutilizables en todo el workflow
 env:
   AWS_REGION: us-east-1
-  SAM_TEMPLATE: infra/template.yaml
   STACK_NAME: expenses-app-manager-backend
 
 # Evita despliegues concurrentes sobre el mismo stack
@@ -94,12 +93,13 @@ jobs:
           role-skip-session-tagging: true
 
       - name: SAM build
-        run: sam build --template ${{ env.SAM_TEMPLATE }}
+        run: sam build
+        working-directory: infra
 
       - name: SAM deploy
+        working-directory: infra
         run: |
           sam deploy \
-            --template ${{ env.SAM_TEMPLATE }} \
             --stack-name ${{ env.STACK_NAME }} \
             --region ${{ env.AWS_REGION }} \
             --capabilities CAPABILITY_IAM \

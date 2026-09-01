@@ -26,7 +26,7 @@ Globals:
   Function:
     Timeout: 10
     Tracing: Active
-    CodeUri: spends-app/
+    CodeUri: ../spends-app/
     Runtime: nodejs22.x
     Architectures:
       - x86_64
