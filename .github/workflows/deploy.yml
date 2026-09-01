@@ -86,7 +86,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
           # Role para la ejecucion del pipeline (generado por 'sam pipeline bootstrap')
-          role-to-assume: arn:aws:iam::947337406633:role/aws-sam-cli-managed-dev-pipel-PipelineExecutionRole-4BTcH0cicdzv
+          role-to-assume: ${{ secrets.PIPELINE_EXECUTION_ROLE }}
           # Nombre de la sesion temporal STS (aparece en CloudTrail)
           role-session-name: sam-pipeline
           # Salta el tag de sesion, que el trust policy de los roles gestionados no permite
@@ -105,4 +105,4 @@ jobs:
             --capabilities CAPABILITY_IAM \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --role-arn arn:aws:iam::947337406633:role/aws-sam-cli-managed-dev-p-CloudFormationExecutionRo-iKKYz13P5Ket
+            --role-arn ${{ secrets.CLOUDFORMATION_EXECUTION_ROLE }}
