@@ -70,9 +70,6 @@ jobs:
     defaults:
       run:
         working-directory: Backend
-    permissions:
-      id-token: write   # Necesario para autenticacion OIDC con AWS
-      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -93,14 +90,17 @@ jobs:
           use-installer: true
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
-          aws-region: ${{ env.AWS_REGION }}
-          # Opcion A (recomendada): OIDC con rol de IAM
-          # role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          # Opcion B (alternativa): claves de acceso
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          # Role para la ejecucion del pipeline (generado por 'sam pipeline bootstrap')
+          role-to-assume: arn:aws:iam::947337406633:role/aws-sam-cli-managed-dev-pipel-PipelineExecutionRole-4BTcH0cicdzv
+          # Nombre de la sesion temporal STS (aparece en CloudTrail)
+          role-session-name: sam-pipeline
+          # Salta el tag de sesion, que el trust policy de los roles gestionados no permite
+          role-skip-session-tagging: true
 
       - name: Ensure SSM parameters exist
         run: |
@@ -127,4 +127,5 @@ jobs:
             --capabilities CAPABILITY_IAM \
             --resolve-s3 \
             --no-confirm-changeset \
-            --no-fail-on-empty-changeset
+            --no-fail-on-empty-changeset \
+            --role-arn arn:aws:iam::947337406633:role/aws-sam-cli-managed-dev-p-CloudFormationExecutionRo-iKKYz13P5Ket
