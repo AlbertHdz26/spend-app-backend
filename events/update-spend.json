@@ -1,0 +1,14 @@
+{
+  "resource": "/spends/{id}",
+  "path": "/spends/11111111-1111-4111-8111-111111111111",
+  "httpMethod": "PUT",
+  "isBase64Encoded": false,
+  "pathParameters": {
+    "id": "11111111-1111-4111-8111-111111111111"
+  },
+  "queryStringParameters": null,
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"name\": \"Café con leche\", \"amount\": 4.5, \"description\": \"Actualización del gasto\"}"
+}

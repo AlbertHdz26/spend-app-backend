@@ -1,0 +1,130 @@
+name: Deploy Backend (SAM)
+
+# Pipeline de CI/CD para el backend serverless (AWS SAM)
+# - Ejecuta los tests unitarios (Jest)
+# - Construye la aplicacion con SAM
+# - Despliega a AWS mediante SAM
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Backend/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'Backend/**'
+  workflow_dispatch:
+
+# Variables reutilizables en todo el workflow
+env:
+  AWS_REGION: us-east-1
+  SAM_TEMPLATE: infra/template.yaml
+  STACK_NAME: expenses-app-manager-backend
+  # Directorio raiz del backend dentro del repositorio
+  WORKING_DIR: Backend
+
+# Evita despliegues concurrentes sobre el mismo stack
+concurrency:
+  group: deploy-backend-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1) Tests unitarios
+  # ---------------------------------------------------------------------------
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Backend/spends-app
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: Backend/spends-app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+  # ---------------------------------------------------------------------------
+  # 2) Build + Deploy con SAM
+  #    Solo se ejecuta en push a main (o ejecucion manual), no en PRs.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    defaults:
+      run:
+        working-directory: Backend
+    permissions:
+      id-token: write   # Necesario para autenticacion OIDC con AWS
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Python (requerido por AWS SAM CLI)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          # Opcion A (recomendada): OIDC con rol de IAM
+          # role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          # Opcion B (alternativa): claves de acceso
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Ensure SSM parameters exist
+        run: |
+          aws ssm put-parameter \
+            --name "/expensesAppManager/auth/user" \
+            --value "${{ secrets.APP_USERNAME }}" \
+            --type "String" \
+            --overwrite
+          aws ssm put-parameter \
+            --name "/expensesAppManager/auth/password" \
+            --value "${{ secrets.APP_PASSWORD }}" \
+            --type "String" \
+            --overwrite
+
+      - name: SAM build
+        run: sam build --template ${{ env.SAM_TEMPLATE }}
+
+      - name: SAM deploy
+        run: |
+          sam deploy \
+            --template ${{ env.SAM_TEMPLATE }} \
+            --stack-name ${{ env.STACK_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --capabilities CAPABILITY_IAM \
+            --resolve-s3 \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset

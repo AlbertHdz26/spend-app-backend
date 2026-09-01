@@ -1,0 +1,230 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  expenses-app-manager
+
+  Sample SAM Template for expenses-app-manager
+
+# Parameters
+Parameters:
+  # Environment variables
+  UserAppSSM:
+    Type: String
+    Description: Usuario de App
+    Default: "/expensesAppManager/auth/user"
+    MinLength: "8"
+    MaxLength: "40"
+  PasswordAppSSM:
+    Type: String
+    Description: Password de App
+    Default: "/expensesAppManager/auth/password"     
+    MinLength: "8"
+    MaxLength: "40"
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 10
+    Tracing: Active
+    CodeUri: spends-app/
+    Runtime: nodejs22.x
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref ExpensesTable
+        APP_USERNAME_SSM: !Ref UserAppSSM
+        APP_PASSWORD_SSM: !Ref PasswordAppSSM
+    LoggingConfig:
+      LogFormat: JSON
+  Api:
+    TracingEnabled: true
+    Cors:
+      AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+      AllowHeaders: "'Content-Type,Authorization'"
+      AllowOrigin: "'*'"
+    Auth:
+      DefaultAuthorizer: BasicAuthorizer
+      AddDefaultAuthorizerToCorsPreflight: false
+      Authorizers:
+        BasicAuthorizer:
+          FunctionArn: !GetAtt AuthFunction.Arn
+          FunctionPayloadType: REQUEST
+          Identity:
+            Headers:
+              - Authorization
+            ReauthorizeEvery: 300
+
+Resources:
+
+  # Lambda Authorizer - valida Basic Auth antes de llegar a las funciones de negocio
+  AuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: controller/authorizer.handler
+      Policies:
+        - SSMParameterReadPolicy:
+            ParameterName: expensesAppManager/auth/*
+
+  # Login - POST /auth (endpoint público, sin authorizer)
+  LoginFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: controller/login.handler
+      Policies:
+        - SSMParameterReadPolicy:
+            ParameterName: expensesAppManager/auth/*
+      Events:
+        login:
+          Type: Api
+          Properties:
+            Path: /auth
+            Method: post
+            Auth:
+              Authorizer: NONE
+
+  # CREATE - POST /spends
+  CreateSpendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: controller/createSpend.handler
+      Events:
+        createSpend:
+          Type: Api
+          Properties:
+            Path: /spends
+            Method: post
+
+  CreateSpendConnector:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: CreateSpendFunction
+      Destination:
+        Id: ExpensesTable
+      Permissions:
+        - Write
+
+  # READ (uno) - GET /spends/{id}
+  GetSpendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: controller/getSpend.handler
+      Events:
+        getSpend:
+          Type: Api
+          Properties:
+            Path: /spends/{id}
+            Method: get
+
+  GetSpendConnector:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: GetSpendFunction
+      Destination:
+        Id: ExpensesTable
+      Permissions:
+        - Read
+
+  # READ (lista) - GET /spends
+  ListSpendsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: controller/listSpends.handler
+      Events:
+        listSpends:
+          Type: Api
+          Properties:
+            Path: /spends
+            Method: get
+
+  ListSpendsConnector:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: ListSpendsFunction
+      Destination:
+        Id: ExpensesTable
+      Permissions:
+        - Read
+
+  # UPDATE - PUT /spends/{id}
+  UpdateSpendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: controller/updateSpend.handler
+      Events:
+        updateSpend:
+          Type: Api
+          Properties:
+            Path: /spends/{id}
+            Method: put
+
+  UpdateSpendConnector:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: UpdateSpendFunction
+      Destination:
+        Id: ExpensesTable
+      Permissions:
+        - Read
+        - Write
+
+  # DELETE - DELETE /spends/{id}
+  DeleteSpendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: controller/deleteSpend.handler
+      Events:
+        deleteSpend:
+          Type: Api
+          Properties:
+            Path: /spends/{id}
+            Method: delete
+
+  DeleteSpendConnector:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: DeleteSpendFunction
+      Destination:
+        Id: ExpensesTable
+      Permissions:
+        - Write
+
+  #simple table dynamodb - Database no relational
+  ExpensesTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: Expenses
+      PrimaryKey:
+        Name: id
+        Type: String
+
+Outputs:
+  SpendsApi:
+    Description: API Gateway base endpoint URL for Prod stage
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/spends"
+  AuthApi:
+    Description: API Gateway login endpoint URL for Prod stage
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/auth"
+  CreateSpendFunction:
+    Description: Create Spend Lambda Function ARN
+    Value: !GetAtt CreateSpendFunction.Arn
+  GetSpendFunction:
+    Description: Get Spend Lambda Function ARN
+    Value: !GetAtt GetSpendFunction.Arn
+  ListSpendsFunction:
+    Description: List Spends Lambda Function ARN
+    Value: !GetAtt ListSpendsFunction.Arn
+  UpdateSpendFunction:
+    Description: Update Spend Lambda Function ARN
+    Value: !GetAtt UpdateSpendFunction.Arn
+  DeleteSpendFunction:
+    Description: Delete Spend Lambda Function ARN
+    Value: !GetAtt DeleteSpendFunction.Arn
+  TableName:
+    Description: Expenses Table Name
+    Value: !Ref ExpensesTable
