@@ -1,0 +1,154 @@
+# Pipeline de CI/CD para el backend serverless (AWS SAM)
+# Migrado desde GitHub Actions (.github/workflows/deploy.yml)
+# - Stage 1: tests unitarios (Jest)
+# - Stage 2: build + deploy con SAM (solo en push a main o ejecucion manual)
+
+# Trigger de CI: push a main (equivale a on.push.branches: [main])
+trigger:
+  branches:
+    include:
+      - main
+
+# Trigger de PR: valida PRs dirigidos a main (equivale a on.pull_request.branches: [main])
+# En un PR solo corre el stage de tests; el deploy se salta por condicion.
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: ubuntu-latest
+
+# Variables reutilizables en todo el pipeline (equivale al bloque env: de GitHub).
+# Las secretas (AWS keys, ARNs de roles) se definen en la UI del pipeline
+# (Edit -> Variables, "Keep this value secret"), NUNCA en texto plano aqui.
+variables:
+  AWS_REGION: us-east-1
+  STACK_NAME: expenses-app-manager-backend
+  # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY: definir como secretas
+  # PIPELINE_EXECUTION_ROLE / CLOUDFORMATION_EXECUTION_ROLE: definir como secretas
+
+stages:
+  # ===========================================================================
+  # 1) Tests unitarios
+  # ===========================================================================
+  - stage: test
+    displayName: 'Unit Tests'
+    jobs:
+      - job: unit_tests
+        displayName: 'Run unit tests'
+        steps:
+          - checkout: self
+
+          # Setup Node 22 (equivale a actions/setup-node con node-version 22).
+          - task: NodeTool@0
+            displayName: 'Setup Node.js'
+            inputs:
+              versionSpec: '22.x'
+
+          # Cache de npm (equivale a cache: 'npm' de setup-node).
+          - task: Cache@2
+            displayName: 'Cache npm'
+            inputs:
+              key: 'npm | "$(Agent.OS)" | spends-app/package-lock.json'
+              restoreKeys: |
+                npm | "$(Agent.OS)"
+              path: $(Pipeline.Workspace)/.npm
+
+          - script: npm ci --cache $(Pipeline.Workspace)/.npm
+            displayName: 'Install dependencies'
+            workingDirectory: spends-app
+
+          - script: npm test
+            displayName: 'Run unit tests'
+            workingDirectory: spends-app
+
+  # ===========================================================================
+  # 2) Build + Deploy con SAM
+  #    dependsOn: test  -> equivale a needs: test
+  #    condition       -> solo en push a main o ejecucion manual (no en PRs),
+  #                       y solo si el stage de tests fue exitoso.
+  # ===========================================================================
+  - stage: deploy
+    displayName: 'Build & Deploy'
+    dependsOn: test
+    condition: >
+      and(
+        succeeded(),
+        in(variables['Build.Reason'], 'IndividualCI', 'BatchedCI', 'Manual'),
+        eq(variables['Build.SourceBranch'], 'refs/heads/main')
+      )
+    # Evita despliegues concurrentes sobre el mismo stack (equivale a concurrency).
+    lockBehavior: sequential
+    jobs:
+      - job: build_deploy
+        displayName: 'Build & Deploy'
+        steps:
+          - checkout: self
+
+          - task: NodeTool@0
+            displayName: 'Setup Node.js'
+            inputs:
+              versionSpec: '22.x'
+
+          # Setup Python (requerido por AWS SAM CLI).
+          - task: UsePythonVersion@0
+            displayName: 'Setup Python'
+            inputs:
+              versionSpec: '3.12'
+
+          # Instalar AWS SAM CLI (equivale a aws-actions/setup-sam).
+          - script: |
+              pip install --upgrade aws-sam-cli
+              sam --version
+            displayName: 'Setup AWS SAM CLI'
+
+          # Configurar credenciales AWS + asumir rol de ejecucion del pipeline.
+          # Equivale a aws-actions/configure-aws-credentials con role-to-assume.
+          - script: |
+              set -e
+              export AWS_ACCESS_KEY_ID="$(AWS_ACCESS_KEY_ID)"
+              export AWS_SECRET_ACCESS_KEY="$(AWS_SECRET_ACCESS_KEY)"
+              export AWS_DEFAULT_REGION="$(AWS_REGION)"
+
+              CREDS=$(aws sts assume-role \
+                --role-arn "$(PIPELINE_EXECUTION_ROLE)" \
+                --role-session-name sam-pipeline \
+                --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+                --output text)
+
+              AKID=$(echo "$CREDS" | cut -f1)
+              SAK=$(echo "$CREDS" | cut -f2)
+              ST=$(echo "$CREDS" | cut -f3)
+
+              echo "##vso[task.setvariable variable=AWS_ACCESS_KEY_ID;issecret=true]$AKID"
+              echo "##vso[task.setvariable variable=AWS_SECRET_ACCESS_KEY;issecret=true]$SAK"
+              echo "##vso[task.setvariable variable=AWS_SESSION_TOKEN;issecret=true]$ST"
+            displayName: 'Configure AWS credentials (assume role)'
+
+          # SAM build (working-directory: infra).
+          - script: sam build
+            displayName: 'SAM build'
+            workingDirectory: infra
+            env:
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+              AWS_SESSION_TOKEN: $(AWS_SESSION_TOKEN)
+              AWS_DEFAULT_REGION: $(AWS_REGION)
+
+          # SAM deploy (working-directory: infra).
+          - script: >
+              sam deploy
+              --stack-name $(STACK_NAME)
+              --region $(AWS_REGION)
+              --capabilities CAPABILITY_IAM
+              --no-confirm-changeset
+              --no-fail-on-empty-changeset
+              --role-arn "$(CLOUDFORMATION_EXECUTION_ROLE)"
+            displayName: 'SAM deploy'
+            workingDirectory: infra
+            env:
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+              AWS_SESSION_TOKEN: $(AWS_SESSION_TOKEN)
+              AWS_DEFAULT_REGION: $(AWS_REGION)
