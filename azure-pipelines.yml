@@ -141,7 +141,7 @@ stages:
               sam deploy
               --stack-name $(STACK_NAME)
               --region $(AWS_REGION)
-              --capabilities CAPABILITY_IAM
+              --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND
               --no-confirm-changeset
               --no-fail-on-empty-changeset
               --role-arn "$(CLOUDFORMATION_EXECUTION_ROLE)"
